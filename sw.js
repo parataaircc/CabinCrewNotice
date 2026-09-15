@@ -1,4 +1,4 @@
-const SHELL_CACHE = 'cn-shell-v13';
+const SHELL_CACHE = 'cn-shell-v14';
 const RUNTIME_CACHE = 'cn-runtime';
 
 const SHELL_FILES = [
