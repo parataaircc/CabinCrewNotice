@@ -127,13 +127,15 @@ async function syncFromGitHub(showToastOnFail = true) {
 
     const notices = Array.from(groupMap.values());
 
-    notices.sort((a, b) => {
-      if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
-      if (!a.date && !b.date) return a.title.localeCompare(b.title, 'ko');
-      if (!a.date) return 1;
-      if (!b.date) return -1;
-      return b.date.localeCompare(a.date);
-    });
+    // 파일 이름이 공지 제목과 같은 첨부파일을 목록 맨 위로 올린다.
+    for (const n of notices) {
+      n.attachments.sort((a, b) => {
+        const aMatch = a.name === n.title;
+        const bMatch = b.name === n.title;
+        if (aMatch === bMatch) return 0;
+        return aMatch ? -1 : 1;
+      });
+    }
 
     state.notices = notices;
     saveNotices(notices);
