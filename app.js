@@ -25,7 +25,6 @@ const state = {
   current: null
 };
 
-/* ---------------- Filename → pinned + date + title ---------------- */
 function parseFilename(name) {
   let base = name.replace(/\.pdf$/i, '');
   let pinned = false;
@@ -49,7 +48,6 @@ function categoryRank(cat) {
   return i === -1 ? CATEGORY_ORDER.length : i;
 }
 
-/* ---------------- Storage ---------------- */
 function loadCachedNotices() {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.notices);
@@ -75,7 +73,6 @@ function setConfig({ owner, repo, branch, path }) {
 function getLastSync() { return localStorage.getItem(STORAGE_KEYS.lastSync); }
 function setLastSync(iso) { localStorage.setItem(STORAGE_KEYS.lastSync, iso); }
 
-/* ---------------- Sync (GitHub Git Trees API, recursive) ---------------- */
 function buildRawUrl(owner, repo, branch, path) {
   const encodedPath = path.split('/').map(encodeURIComponent).join('/');
   return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${encodedPath}`;
@@ -158,7 +155,6 @@ async function syncFromGitHub(showToastOnFail = true) {
   }
 }
 
-/* ---------------- PDF caching ---------------- */
 async function isCached(url) {
   if (!('caches' in window)) return false;
   try {
@@ -179,7 +175,7 @@ async function pruneStaleCache(oldNotices, newNotices) {
         }
       }
     }
-  } catch { /* ignore */ }
+  } catch {}
 }
 
 async function isNoticeFullyCached(n) {
@@ -216,7 +212,7 @@ async function getPdfObjectUrl(url) {
         : new Blob([rawBlob], { type: 'application/pdf' });
       return URL.createObjectURL(pdfBlob);
     }
-  } catch { /* fall through */ }
+  } catch {}
   return url;
 }
 
@@ -235,7 +231,6 @@ async function downloadAllPdfs() {
   renderList();
 }
 
-/* ---------------- Rendering: list ---------------- */
 function updateSyncLine() {
   const last = getLastSync();
   el('syncLine').textContent = last
@@ -300,7 +295,6 @@ async function renderList() {
   }
 }
 
-/* ---------------- Detail (PDF viewer) ---------------- */
 async function openDetail(n) {
   state.current = n;
   el('listView').hidden = true;
@@ -347,7 +341,6 @@ function closeDetail() {
   el('listView').hidden = false;
 }
 
-/* ---------------- Settings panel ---------------- */
 function openSettings() {
   const c = getConfig();
   el('ownerInput').value = c.owner;
@@ -358,7 +351,6 @@ function openSettings() {
 }
 function closeSettings() { el('settingsPanel').hidden = true; }
 
-/* ---------------- Toast ---------------- */
 let toastTimer = null;
 function showToast(msg) {
   const t = el('toast');
@@ -368,7 +360,6 @@ function showToast(msg) {
   toastTimer = setTimeout(() => { t.hidden = true; }, 2600);
 }
 
-/* ---------------- Online status ---------------- */
 function updateNetDot() {
   const dot = el('netDot');
   const online = navigator.onLine;
@@ -376,7 +367,6 @@ function updateNetDot() {
   dot.title = online ? '온라인' : '오프라인';
 }
 
-/* ---------------- Login gate ---------------- */
 function isLoggedIn() {
   return localStorage.getItem(STORAGE_KEYS.authed) === '1';
 }
@@ -401,7 +391,6 @@ function showApp() {
   initApp();
 }
 
-/* ---------------- Wire up ---------------- */
 function init() {
   if (isLoggedIn()) {
     showApp();
