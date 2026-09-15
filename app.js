@@ -29,7 +29,7 @@ function titleFromFilename(name) {
   return name.replace(/\.pdf$/i, '').trim();
 }
 
-const CATEGORY_ORDER = ['Safety&Security', 'Service', 'General', 'Catering', 'Schedule', 'Manual', 'Station Information'];
+const CATEGORY_ORDER = ['Safety&Security', 'Service', 'General', 'Catering', 'Station INFO'];
 function categoryRank(cat) {
   const i = CATEGORY_ORDER.indexOf(cat);
   return i === -1 ? CATEGORY_ORDER.length : i;
