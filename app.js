@@ -216,18 +216,26 @@ async function getPdfObjectUrl(url) {
   return url;
 }
 
-async function downloadAllPdfs() {
-  const statusEl = el('downloadStatus');
+async function downloadAllPdfs(statusEl) {
   const allAttachments = state.notices.flatMap(n => n.attachments);
-  if (!allAttachments.length) { statusEl.textContent = '내려받을 PDF가 없어요.'; return; }
+  const setStatus = (msg) => { if (statusEl) statusEl.textContent = msg; };
+  if (!allAttachments.length) {
+    const msg = '내려받을 PDF가 없어요.';
+    setStatus(msg);
+    if (!statusEl) showToast(msg);
+    return;
+  }
   let done = 0;
-  statusEl.textContent = `내려받는 중... (0/${allAttachments.length})`;
+  setStatus(`내려받는 중... (0/${allAttachments.length})`);
+  if (!statusEl) showToast(`PDF 내려받는 중... (0/${allAttachments.length})`);
   for (const att of allAttachments) {
     await ensureCached(att.url);
     done++;
-    statusEl.textContent = `내려받는 중... (${done}/${allAttachments.length})`;
+    setStatus(`내려받는 중... (${done}/${allAttachments.length})`);
   }
-  statusEl.textContent = `완료: ${done}/${allAttachments.length}건 오프라인 저장됨`;
+  const finalMsg = `완료: ${done}/${allAttachments.length}건 오프라인 저장됨`;
+  setStatus(finalMsg);
+  if (!statusEl) showToast(finalMsg);
   renderList();
 }
 
@@ -424,7 +432,8 @@ function initApp() {
     closeSettings();
     syncFromGitHub();
   });
-  el('downloadAllBtn').addEventListener('click', downloadAllPdfs);
+  el('downloadAllBtn').addEventListener('click', () => downloadAllPdfs(el('downloadStatus')));
+  el('downloadAllTopBtn').addEventListener('click', () => downloadAllPdfs());
 
   window.addEventListener('online', () => { updateNetDot(); syncFromGitHub(false); });
   window.addEventListener('offline', updateNetDot);
