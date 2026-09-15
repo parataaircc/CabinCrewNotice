@@ -12,7 +12,7 @@ const STORAGE_KEYS = {
 
 const LOGIN_ID = 'PTACC';
 const LOGIN_PW = 'ptacc1!';
-const GH_TOKEN = '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';
+const PROXY_URL = 'https://script.google.com/macros/s/여기에_배포_ID를_붙여넣기/exec';
 
 const RUNTIME_CACHE = 'cn-runtime';
 
@@ -86,15 +86,12 @@ async function syncFromGitHub(showToastOnFail = true) {
   if (!owner || !repo) { openSettings(); return; }
 
   const oldNotices = state.notices;
-  const treeUrl = `https://api.github.com/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`;
+  const treeUrl = PROXY_URL;
   const rootPrefix = path.replace(/^\/|\/$/g, '') + '/';
 
   try {
     const res = await fetch(treeUrl, {
-      headers: {
-        Accept: 'application/vnd.github+json',
-        Authorization: 'Bearer ' + GH_TOKEN
-      },
+      headers: { Accept: 'application/vnd.github+json' },
       cache: 'no-store'
     });
     if (!res.ok) throw new Error('GitHub API 오류: ' + res.status);
@@ -131,15 +128,22 @@ async function syncFromGitHub(showToastOnFail = true) {
 
     const notices = Array.from(groupMap.values());
 
-    // 파일 이름이 공지 제목과 같은 첨부파일을 목록 맨 위로 올린다. (파일명 끝의 날짜는 떼고 비교)
     for (const n of notices) {
       n.attachments.sort((a, b) => {
-        const aMatch = a.name === n.title;
-        const bMatch = b.name === n.title;
+        const aMatch = parseFilename(a.name).title === n.title;
+        const bMatch = parseFilename(b.name).title === n.title;
         if (aMatch === bMatch) return 0;
         return aMatch ? -1 : 1;
       });
     }
+
+    notices.sort((a, b) => {
+      if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+      if (!a.date && !b.date) return a.title.localeCompare(b.title, 'ko');
+      if (!a.date) return 1;
+      if (!b.date) return -1;
+      return b.date.localeCompare(a.date);
+    });
 
     state.notices = notices;
     saveNotices(notices);
