@@ -329,4 +329,122 @@ async function openDetail(n) {
     btn.textContent = (multi ? att.name + ' · ' : '') + '불러오는 중...';
     const objectUrl = await getPdfObjectUrl(att.url);
     btn.disabled = false;
-    btn.textContent = multi ? att.name :
+    btn.textContent = multi ? att.name : 'PDF 보기';
+    btn.onclick = () => {
+      window.location.href = objectUrl;
+    };
+  }
+
+  const allCached = await isNoticeFullyCached(n);
+  el('detailCachedTag').textContent = allCached ? '오프라인 저장됨' : (navigator.onLine ? '온라인에서 볼 수 있음 (저장 안 됨)' : '오프라인 · 일부 미저장');
+  el('detailCachedTag').className = 'cached-tag' + (allCached ? '' : ' pending');
+
+  window.scrollTo(0, 0);
+}
+
+function closeDetail() {
+  el('detailView').hidden = true;
+  el('listView').hidden = false;
+}
+
+/* ---------------- Settings panel ---------------- */
+function openSettings() {
+  const c = getConfig();
+  el('ownerInput').value = c.owner;
+  el('repoInput').value = c.repo;
+  el('branchInput').value = c.branch;
+  el('pathInput').value = c.path;
+  el('settingsPanel').hidden = false;
+}
+function closeSettings() { el('settingsPanel').hidden = true; }
+
+/* ---------------- Toast ---------------- */
+let toastTimer = null;
+function showToast(msg) {
+  const t = el('toast');
+  t.textContent = msg;
+  t.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.hidden = true; }, 2600);
+}
+
+/* ---------------- Online status ---------------- */
+function updateNetDot() {
+  const dot = el('netDot');
+  const online = navigator.onLine;
+  dot.className = 'net-dot ' + (online ? 'online' : 'offline');
+  dot.title = online ? '온라인' : '오프라인';
+}
+
+/* ---------------- Login gate ---------------- */
+function isLoggedIn() {
+  return localStorage.getItem(STORAGE_KEYS.authed) === '1';
+}
+
+function attemptLogin() {
+  const idVal = el('loginIdInput').value.trim();
+  const pwVal = el('loginPwInput').value.trim();
+  const errorEl = el('loginError');
+  errorEl.hidden = true;
+
+  if (idVal.toUpperCase() === LOGIN_ID && pwVal === LOGIN_PW) {
+    localStorage.setItem(STORAGE_KEYS.authed, '1');
+    showApp();
+  } else {
+    errorEl.hidden = false;
+  }
+}
+
+function showApp() {
+  el('loginView').hidden = true;
+  el('appRoot').hidden = false;
+  initApp();
+}
+
+/* ---------------- Wire up ---------------- */
+function init() {
+  if (isLoggedIn()) {
+    showApp();
+    return;
+  }
+  el('loginBtn').addEventListener('click', attemptLogin);
+  el('loginPwInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') attemptLogin();
+  });
+}
+
+function initApp() {
+  state.notices = loadCachedNotices();
+  renderCategoryChips();
+  renderList();
+  updateSyncLine();
+  updateNetDot();
+
+  el('searchInput').addEventListener('input', (e) => { state.query = e.target.value; renderList(); });
+  el('backBtn').addEventListener('click', closeDetail);
+  el('syncBtn').addEventListener('click', () => syncFromGitHub());
+  el('settingsBtn').addEventListener('click', openSettings);
+  el('closeSettingsBtn').addEventListener('click', closeSettings);
+  el('saveSettingsBtn').addEventListener('click', () => {
+    setConfig({
+      owner: el('ownerInput').value.trim(),
+      repo: el('repoInput').value.trim(),
+      branch: el('branchInput').value.trim() || 'main',
+      path: el('pathInput').value.trim() || 'notices'
+    });
+    closeSettings();
+    syncFromGitHub();
+  });
+  el('downloadAllBtn').addEventListener('click', downloadAllPdfs);
+
+  window.addEventListener('online', () => { updateNetDot(); syncFromGitHub(false); });
+  window.addEventListener('offline', updateNetDot);
+
+  syncFromGitHub(false);
+
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
+}
+
+document.addEventListener('DOMContentLoaded', init);
