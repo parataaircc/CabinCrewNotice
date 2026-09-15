@@ -97,31 +97,35 @@ async function syncFromGitHub(showToastOnFail = true) {
     const data = await res.json();
     if (!Array.isArray(data.tree)) throw new Error('저장소/브랜치 정보를 확인해줘.');
 
-    const rawNotices = data.tree
-      .filter(it => it.type === 'blob' && it.path.startsWith(rootPrefix) && /\.pdf$/i.test(it.path))
-      .map(it => {
-        const rel = it.path.slice(rootPrefix.length);
-        const segments = rel.split('/');
-        const category = segments.length > 1 ? segments[0] : '미분류';
-        const filename = segments[segments.length - 1];
-        const { date, title, pinned } = parseFilename(filename);
-        return {
-          id: it.sha,
-          filename,
-          category,
-          date,
-          title,
-          pinned,
-          url: buildRawUrl(owner, repo, branch, it.path)
-        };
-      });
+    const pdfBlobs = data.tree.filter(it => it.type === 'blob' && it.path.startsWith(rootPrefix) && /\.pdf$/i.test(it.path));
 
-    const seen = new Set();
-    const notices = rawNotices.filter(n => {
-      if (seen.has(n.id)) return false;
-      seen.add(n.id);
-      return true;
-    });
+    const seenSha = new Set();
+    const groupMap = new Map();
+
+    for (const it of pdfBlobs) {
+      if (seenSha.has(it.sha)) continue;
+      seenSha.add(it.sha);
+
+      const rel = it.path.slice(rootPrefix.length);
+      const segments = rel.split('/');
+      const category = segments.length > 1 ? segments[0] : '미분류';
+      const filename = segments[segments.length - 1];
+      const dirSegments = segments.slice(0, -1);
+      const isGrouped = dirSegments.length >= 2;
+      const groupKey = isGrouped ? dirSegments.join('/') : it.path;
+      const nameForParsing = isGrouped ? dirSegments[dirSegments.length - 1] : filename;
+      const { date, title, pinned } = parseFilename(nameForParsing);
+
+      if (!groupMap.has(groupKey)) {
+        groupMap.set(groupKey, { id: groupKey, category, date, title, pinned, attachments: [] });
+      }
+      groupMap.get(groupKey).attachments.push({
+        name: filename.replace(/\.pdf$/i, ''),
+        url: buildRawUrl(owner, repo, branch, it.path)
+      });
+    }
+
+    const notices = Array.from(groupMap.values());
 
     notices.sort((a, b) => {
       if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
@@ -156,14 +160,23 @@ async function isCached(url) {
 async function pruneStaleCache(oldNotices, newNotices) {
   if (!('caches' in window)) return;
   try {
-    const newUrls = new Set(newNotices.map(n => n.url));
+    const newUrls = new Set(newNotices.flatMap(n => n.attachments.map(a => a.url)));
     const cache = await caches.open(RUNTIME_CACHE);
     for (const n of oldNotices) {
-      if (!newUrls.has(n.url)) {
-        await cache.delete(n.url);
+      for (const att of n.attachments) {
+        if (!newUrls.has(att.url)) {
+          await cache.delete(att.url);
+        }
       }
     }
   } catch { /* ignore */ }
+}
+
+async function isNoticeFullyCached(n) {
+  for (const att of n.attachments) {
+    if (!(await isCached(att.url))) return false;
+  }
+  return true;
 }
 
 async function ensureCached(url) {
@@ -199,15 +212,16 @@ async function getPdfObjectUrl(url) {
 
 async function downloadAllPdfs() {
   const statusEl = el('downloadStatus');
-  if (!state.notices.length) { statusEl.textContent = '내려받을 PDF가 없어요.'; return; }
+  const allAttachments = state.notices.flatMap(n => n.attachments);
+  if (!allAttachments.length) { statusEl.textContent = '내려받을 PDF가 없어요.'; return; }
   let done = 0;
-  statusEl.textContent = `내려받는 중... (0/${state.notices.length})`;
-  for (const n of state.notices) {
-    await ensureCached(n.url);
+  statusEl.textContent = `내려받는 중... (0/${allAttachments.length})`;
+  for (const att of allAttachments) {
+    await ensureCached(att.url);
     done++;
-    statusEl.textContent = `내려받는 중... (${done}/${state.notices.length})`;
+    statusEl.textContent = `내려받는 중... (${done}/${allAttachments.length})`;
   }
-  statusEl.textContent = `완료: ${done}/${state.notices.length}건 오프라인 저장됨`;
+  statusEl.textContent = `완료: ${done}/${allAttachments.length}건 오프라인 저장됨`;
   renderList();
 }
 
@@ -261,14 +275,15 @@ async function renderList() {
   el('emptyState').hidden = list.length > 0;
 
   for (const n of list) {
-    const cached = await isCached(n.url);
+    const cached = await isNoticeFullyCached(n);
+    const multi = n.attachments.length > 1;
     const card = document.createElement('div');
     card.className = 'notice-card' + (n.pinned ? ' pinned' : '');
     card.style.borderLeftColor = n.pinned ? '#C9A227' : colorForCategory(n.category);
     card.innerHTML = `
       <div class="meta">${n.pinned ? '<span class="pin-badge">📌 공지</span>' : ''}<span class="cat">${escapeHtml(n.category)}</span>${n.date ? `<span>${escapeHtml(n.date)}</span>` : ''}</div>
       <h3>${escapeHtml(n.title)}</h3>
-      <span class="attach-flag${cached ? ' saved' : ''}">${cached ? '오프라인 저장됨' : 'PDF · 온라인 필요'}</span>
+      <span class="attach-flag${cached ? ' saved' : ''}">${cached ? '오프라인 저장됨' : (multi ? `첨부 ${n.attachments.length}건 · 온라인 필요` : 'PDF · 온라인 필요')}</span>
     `;
     card.onclick = () => openDetail(n);
     wrap.appendChild(card);
@@ -285,33 +300,34 @@ async function openDetail(n) {
   el('detailDate').textContent = n.date ? ` · ${n.date}` : '';
   el('detailTitle').textContent = n.title;
 
-  const cachedBefore = await isCached(n.url);
-  el('detailCachedTag').textContent = cachedBefore ? '오프라인 저장됨' : (navigator.onLine ? '온라인에서 볼 수 있음 (저장 안 됨)' : '오프라인 · 아직 저장 안 됨');
-  el('detailCachedTag').className = 'cached-tag' + (cachedBefore ? '' : ' pending');
+  const multi = n.attachments.length > 1;
+  const wrap = el('attachmentList');
+  wrap.innerHTML = '';
 
-  const btn = el('viewPdfBtn');
+  for (const att of n.attachments) {
+    const btn = document.createElement('button');
+    btn.className = 'btn-primary pdf-open-btn';
+    wrap.appendChild(btn);
 
-  if (!cachedBefore && !navigator.onLine) {
+    const cachedBefore = await isCached(att.url);
+    if (!cachedBefore && !navigator.onLine) {
+      btn.disabled = true;
+      btn.textContent = (multi ? att.name + ' · ' : '') + '오프라인 상태 · 열 수 없음';
+      continue;
+    }
     btn.disabled = true;
-    btn.textContent = '오프라인 상태 · 열 수 없음';
-    window.scrollTo(0, 0);
-    return;
+    btn.textContent = (multi ? att.name + ' · ' : '') + '불러오는 중...';
+    const objectUrl = await getPdfObjectUrl(att.url);
+    btn.disabled = false;
+    btn.textContent = multi ? att.name : 'PDF 보기';
+    btn.onclick = () => {
+      window.location.href = objectUrl;
+    };
   }
 
-  btn.disabled = true;
-  btn.textContent = '불러오는 중...';
-  const objectUrl = await getPdfObjectUrl(n.url);
-  btn.disabled = false;
-  btn.textContent = 'PDF 보기';
-  btn.onclick = () => {
-    window.location.href = objectUrl;
-  };
-
-  if (await isCached(n.url)) {
-    el('detailCachedTag').textContent = '오프라인 저장됨';
-    el('detailCachedTag').className = 'cached-tag';
-    renderList();
-  }
+  const allCached = await isNoticeFullyCached(n);
+  el('detailCachedTag').textContent = allCached ? '오프라인 저장됨' : (navigator.onLine ? '온라인에서 볼 수 있음 (저장 안 됨)' : '오프라인 · 일부 미저장');
+  el('detailCachedTag').className = 'cached-tag' + (allCached ? '' : ' pending');
 
   window.scrollTo(0, 0);
 }
