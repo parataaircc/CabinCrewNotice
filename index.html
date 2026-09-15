@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>객실 공지사항</title>
+<meta name="theme-color" content="#1B2A41">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<section id="loginView" class="login-view">
+  <div class="login-card">
+    <span class="brand-mark" aria-hidden="true"></span>
+    <h1>객실 공지사항</h1>
+    <p class="settings-help">사번으로 로그인해줘.</p>
+    <label for="loginIdInput">아이디</label>
+    <input id="loginIdInput" type="text" value="PTACC" autocomplete="off">
+    <label for="loginPwInput">비밀번호 (사번)</label>
+    <input id="loginPwInput" type="password" inputmode="numeric" autocomplete="off" placeholder="사번 입력">
+    <button id="loginBtn" class="btn-primary login-btn">로그인</button>
+    <p id="loginError" class="login-error" hidden>아이디 또는 사번이 올바르지 않아요.</p>
+    <p id="loginStatus" class="settings-help"></p>
+  </div>
+</section>
+
+<div id="appRoot" hidden>
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true"></span>
+    <div class="brand-text">
+      <h1>객실 공지사항</h1>
+      <p id="syncLine" class="sync-line">아직 동기화되지 않음</p>
+    </div>
+  </div>
+  <div class="status-cluster">
+    <span id="netDot" class="net-dot" title="연결 상태"></span>
+    <button id="syncBtn" class="btn-ghost">동기화</button>
+    <button id="settingsBtn" class="btn-ghost" aria-label="설정">설정</button>
+  </div>
+</header>
+
+<div class="toolbar">
+  <input id="searchInput" type="search" placeholder="제목 검색" autocomplete="off">
+  <div id="categoryChips" class="chips"></div>
+</div>
+
+<main id="app">
+  <section id="listView" class="list-view">
+    <div id="noticeList" class="notice-list"></div>
+    <p id="emptyState" class="empty-state" hidden>표시할 공지사항이 없습니다. 설정에서 저장소를 연결해줘.</p>
+  </section>
+
+  <section id="detailView" class="detail-view" hidden>
+    <button id="backBtn" class="btn-back">← 목록으로</button>
+    <div class="detail-head">
+      <div class="d-meta"><span id="detailCat" class="d-cat"></span></div>
+      <h2 id="detailTitle"></h2>
+      <div class="detail-actions">
+        <span id="detailCachedTag" class="cached-tag"></span>
+      </div>
+    </div>
+    <button id="viewPdfBtn" class="btn-primary pdf-open-btn">PDF 보기</button>
+    <p class="settings-help">여러 페이지 PDF는 앱 안이 아니라 새 탭의 기본 PDF 뷰어로 열려야 스크롤·확대가 잘 돼.</p>
+  </section>
+</main>
+
+<div id="settingsPanel" class="settings-panel" hidden>
+  <div class="settings-card">
+    <h2>저장소 연결</h2>
+    <p class="settings-help">PDF 공지사항이 올라가는 GitHub 저장소 정보를 입력해줘. (공개 저장소 기준, 폴더 경로 안의 하위폴더까지 전부 자동으로 읽어와)</p>
+    <label for="ownerInput">GitHub 사용자/조직명</label>
+    <input id="ownerInput" type="text" placeholder="예: ruonlee">
+    <label for="repoInput">저장소 이름</label>
+    <input id="repoInput" type="text" placeholder="예: cabin-notice-pwa">
+    <label for="branchInput">브랜치</label>
+    <input id="branchInput" type="text" placeholder="main" value="main">
+    <label for="pathInput">폴더 경로</label>
+    <input id="pathInput" type="text" placeholder="notices" value="notices">
+    <div class="settings-actions">
+      <button id="saveSettingsBtn" class="btn-primary">저장하고 동기화</button>
+      <button id="closeSettingsBtn" class="btn-ghost">닫기</button>
+    </div>
+    <p class="settings-help">비행 전에 PDF를 전부 미리 저장해두고 싶으면 동기화 후 <b>전체 PDF 내려받기</b>를 눌러줘.</p>
+    <button id="downloadAllBtn" class="btn-secondary">전체 PDF 내려받기</button>
+    <p id="downloadStatus" class="settings-help"></p>
+  </div>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

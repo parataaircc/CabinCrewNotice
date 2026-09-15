@@ -1,0 +1,15 @@
+{
+  "name": "객실 공지사항",
+  "short_name": "객실공지",
+  "description": "파라타항공 객실승무팀 공지사항 오프라인 열람",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F5F7FA",
+  "theme_color": "#1B2A41",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

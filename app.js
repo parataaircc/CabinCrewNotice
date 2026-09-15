@@ -1,0 +1,396 @@
+/* 객실 공지사항 오프라인 뷰어 (PDF / GitHub 저장소 기반) */
+
+const STORAGE_KEYS = {
+  owner: 'cn_gh_owner',
+  repo: 'cn_gh_repo',
+  branch: 'cn_gh_branch',
+  path: 'cn_gh_path',
+  notices: 'cn_notices_cache',
+  lastSync: 'cn_last_sync',
+  authed: 'cn_authed'
+};
+
+const LOGIN_ID = 'PTACC';
+const LOGIN_PW = 'ptacc1!';
+
+const RUNTIME_CACHE = 'cn-runtime';
+
+const el = (id) => document.getElementById(id);
+
+const state = {
+  notices: [],
+  activeCategory: '전체',
+  query: '',
+  current: null
+};
+
+/* ---------------- Filename → title ---------------- */
+function titleFromFilename(name) {
+  return name.replace(/\.pdf$/i, '').trim();
+}
+
+const CATEGORY_ORDER = ['Safety&Security', 'Service', 'General', 'Catering', 'Schedule', 'Manual', 'Station Information'];
+function categoryRank(cat) {
+  const i = CATEGORY_ORDER.indexOf(cat);
+  return i === -1 ? CATEGORY_ORDER.length : i;
+}
+
+/* ---------------- Storage ---------------- */
+function loadCachedNotices() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.notices);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+function saveNotices(list) { localStorage.setItem(STORAGE_KEYS.notices, JSON.stringify(list)); }
+
+function getConfig() {
+  return {
+    owner: localStorage.getItem(STORAGE_KEYS.owner) || 'lluon9292',
+    repo: localStorage.getItem(STORAGE_KEYS.repo) || 'Cabin-Crew-Notice',
+    branch: localStorage.getItem(STORAGE_KEYS.branch) || 'main',
+    path: localStorage.getItem(STORAGE_KEYS.path) || 'notices'
+  };
+}
+function setConfig({ owner, repo, branch, path }) {
+  localStorage.setItem(STORAGE_KEYS.owner, owner);
+  localStorage.setItem(STORAGE_KEYS.repo, repo);
+  localStorage.setItem(STORAGE_KEYS.branch, branch || 'main');
+  localStorage.setItem(STORAGE_KEYS.path, path || 'notices');
+}
+function getLastSync() { return localStorage.getItem(STORAGE_KEYS.lastSync); }
+function setLastSync(iso) { localStorage.setItem(STORAGE_KEYS.lastSync, iso); }
+
+/* ---------------- Sync (GitHub Git Trees API, recursive) ---------------- */
+function buildRawUrl(owner, repo, branch, path) {
+  const encodedPath = path.split('/').map(encodeURIComponent).join('/');
+  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${encodedPath}`;
+}
+
+async function syncFromGitHub(showToastOnFail = true) {
+  const { owner, repo, branch, path } = getConfig();
+  if (!owner || !repo) { openSettings(); return; }
+
+  const treeUrl = `https://api.github.com/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`;
+  const rootPrefix = path.replace(/^\/|\/$/g, '') + '/';
+
+  try {
+    const res = await fetch(treeUrl, {
+      headers: { Accept: 'application/vnd.github+json' },
+      cache: 'no-store'
+    });
+    if (!res.ok) throw new Error('GitHub API 오류: ' + res.status);
+    const data = await res.json();
+    if (!Array.isArray(data.tree)) throw new Error('저장소/브랜치 정보를 확인해줘.');
+
+    const rawNotices = data.tree
+      .filter(it => it.type === 'blob' && it.path.startsWith(rootPrefix) && /\.pdf$/i.test(it.path))
+      .map(it => {
+        const rel = it.path.slice(rootPrefix.length); // e.g. "Service/파일.pdf" or "파일.pdf"
+        const segments = rel.split('/');
+        const category = segments.length > 1 ? segments[0] : '미분류';
+        const filename = segments[segments.length - 1];
+        return {
+          id: it.sha,
+          filename,
+          category,
+          title: titleFromFilename(filename),
+          url: buildRawUrl(owner, repo, branch, it.path)
+        };
+      });
+
+    // 내용이 완전히 같은 파일(sha 동일)은 한 번만 남긴다 — 실수로 중복 업로드된 경우 방지
+    const seen = new Set();
+    const notices = rawNotices.filter(n => {
+      if (seen.has(n.id)) return false;
+      seen.add(n.id);
+      return true;
+    });
+
+    notices.sort((a, b) => {
+      const rankDiff = categoryRank(a.category) - categoryRank(b.category);
+      if (rankDiff !== 0) return rankDiff;
+      return a.title.localeCompare(b.title, 'ko');
+    });
+
+    state.notices = notices;
+    saveNotices(notices);
+    setLastSync(new Date().toISOString());
+    renderCategoryChips();
+    renderList();
+    updateSyncLine();
+    showToast(`공지사항 ${notices.length}건을 동기화했어요.`);
+  } catch (e) {
+    if (showToastOnFail) showToast('동기화 실패 — 오프라인 상태이거나 저장소 정보가 올바르지 않아요.');
+  }
+}
+
+/* ---------------- PDF caching ---------------- */
+async function isCached(url) {
+  if (!('caches' in window)) return false;
+  try {
+    const cache = await caches.open(RUNTIME_CACHE);
+    return !!(await cache.match(url, { ignoreVary: true }));
+  } catch { return false; }
+}
+
+async function ensureCached(url) {
+  try {
+    const cache = await caches.open(RUNTIME_CACHE);
+    const existing = await cache.match(url, { ignoreVary: true });
+    if (existing) return true;
+    const res = await fetch(url);
+    if (!res.ok) return false;
+    await cache.put(url, res.clone());
+    return true;
+  } catch { return false; }
+}
+
+async function getPdfObjectUrl(url) {
+  try {
+    const cache = await caches.open(RUNTIME_CACHE);
+    let res = await cache.match(url, { ignoreVary: true });
+    if (!res) {
+      res = await fetch(url);
+      if (res && res.ok) await cache.put(url, res.clone());
+    }
+    if (res) {
+      const rawBlob = await res.blob();
+      // Some CDNs (e.g. raw.githubusercontent.com) don't send a correct
+      // application/pdf content-type, which makes browsers render a blank
+      // frame instead of the PDF. Force the type explicitly.
+      const pdfBlob = rawBlob.type === 'application/pdf'
+        ? rawBlob
+        : new Blob([rawBlob], { type: 'application/pdf' });
+      return URL.createObjectURL(pdfBlob);
+    }
+  } catch { /* fall through */ }
+  return url;
+}
+
+async function downloadAllPdfs() {
+  const statusEl = el('downloadStatus');
+  if (!state.notices.length) { statusEl.textContent = '내려받을 PDF가 없어요.'; return; }
+  let done = 0;
+  statusEl.textContent = `내려받는 중... (0/${state.notices.length})`;
+  for (const n of state.notices) {
+    await ensureCached(n.url);
+    done++;
+    statusEl.textContent = `내려받는 중... (${done}/${state.notices.length})`;
+  }
+  statusEl.textContent = `완료: ${done}/${state.notices.length}건 오프라인 저장됨`;
+  renderList();
+}
+
+/* ---------------- Rendering: list ---------------- */
+function updateSyncLine() {
+  const last = getLastSync();
+  el('syncLine').textContent = last
+    ? `마지막 동기화: ${new Date(last).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`
+    : '아직 동기화되지 않음';
+}
+
+function renderCategoryChips() {
+  const present = [...new Set(state.notices.map(n => n.category))];
+  present.sort((a, b) => categoryRank(a) - categoryRank(b));
+  const cats = ['전체', ...present];
+  const wrap = el('categoryChips');
+  wrap.innerHTML = '';
+  cats.forEach(cat => {
+    const b = document.createElement('button');
+    b.className = 'chip' + (state.activeCategory === cat ? ' active' : '');
+    b.textContent = cat;
+    b.onclick = () => { state.activeCategory = cat; renderCategoryChips(); renderList(); };
+    wrap.appendChild(b);
+  });
+}
+
+function filteredNotices() {
+  return state.notices.filter(n => {
+    const catOk = state.activeCategory === '전체' || n.category === state.activeCategory;
+    const q = state.query.trim().toLowerCase();
+    const qOk = !q || n.title.toLowerCase().includes(q);
+    return catOk && qOk;
+  });
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+const CATEGORY_COLORS = ['#4A6FA5', '#C9A227', '#6B8F71', '#A45C6B', '#7A6BA5', '#4A9BA5'];
+function colorForCategory(cat) {
+  let h = 0;
+  for (let i = 0; i < cat.length; i++) h = (h * 31 + cat.charCodeAt(i)) >>> 0;
+  return CATEGORY_COLORS[h % CATEGORY_COLORS.length];
+}
+
+async function renderList() {
+  const list = filteredNotices();
+  const wrap = el('noticeList');
+  wrap.innerHTML = '';
+  el('emptyState').hidden = list.length > 0;
+
+  for (const n of list) {
+    const cached = await isCached(n.url);
+    const card = document.createElement('div');
+    card.className = 'notice-card';
+    card.style.borderLeftColor = colorForCategory(n.category);
+    card.innerHTML = `
+      <div class="meta"><span class="cat">${escapeHtml(n.category)}</span></div>
+      <h3>${escapeHtml(n.title)}</h3>
+      <span class="attach-flag${cached ? ' saved' : ''}">${cached ? '오프라인 저장됨' : 'PDF · 온라인 필요'}</span>
+    `;
+    card.onclick = () => openDetail(n);
+    wrap.appendChild(card);
+  }
+}
+
+/* ---------------- Detail (PDF viewer) ---------------- */
+async function openDetail(n) {
+  state.current = n;
+  el('listView').hidden = true;
+  el('detailView').hidden = false;
+
+  el('detailCat').textContent = n.category;
+  el('detailTitle').textContent = n.title;
+
+  const cachedBefore = await isCached(n.url);
+  el('detailCachedTag').textContent = cachedBefore ? '오프라인 저장됨' : (navigator.onLine ? '온라인에서 볼 수 있음 (저장 안 됨)' : '오프라인 · 아직 저장 안 됨');
+  el('detailCachedTag').className = 'cached-tag' + (cachedBefore ? '' : ' pending');
+
+  const btn = el('viewPdfBtn');
+
+  if (!cachedBefore && !navigator.onLine) {
+    btn.disabled = true;
+    btn.textContent = '오프라인 상태 · 열 수 없음';
+    window.scrollTo(0, 0);
+    return;
+  }
+
+  // 사파리는 await로 잠깐 기다렸다가 페이지를 이동시키면 '사용자가 직접 누른 것'으로
+  // 인정하지 않고 조용히 막는 경우가 있어서, 클릭 전에 미리 PDF를 준비해둔다.
+  btn.disabled = true;
+  btn.textContent = '불러오는 중...';
+  const objectUrl = await getPdfObjectUrl(n.url);
+  btn.disabled = false;
+  btn.textContent = 'PDF 보기';
+  btn.onclick = () => {
+    window.location.href = objectUrl;
+  };
+
+  if (await isCached(n.url)) {
+    el('detailCachedTag').textContent = '오프라인 저장됨';
+    el('detailCachedTag').className = 'cached-tag';
+    renderList();
+  }
+
+  window.scrollTo(0, 0);
+}
+
+function closeDetail() {
+  el('detailView').hidden = true;
+  el('listView').hidden = false;
+}
+
+/* ---------------- Settings panel ---------------- */
+function openSettings() {
+  const c = getConfig();
+  el('ownerInput').value = c.owner;
+  el('repoInput').value = c.repo;
+  el('branchInput').value = c.branch;
+  el('pathInput').value = c.path;
+  el('settingsPanel').hidden = false;
+}
+function closeSettings() { el('settingsPanel').hidden = true; }
+
+/* ---------------- Toast ---------------- */
+let toastTimer = null;
+function showToast(msg) {
+  const t = el('toast');
+  t.textContent = msg;
+  t.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.hidden = true; }, 2600);
+}
+
+/* ---------------- Online status ---------------- */
+function updateNetDot() {
+  const dot = el('netDot');
+  const online = navigator.onLine;
+  dot.className = 'net-dot ' + (online ? 'online' : 'offline');
+  dot.title = online ? '온라인' : '오프라인';
+}
+
+/* ---------------- Login gate ---------------- */
+function isLoggedIn() {
+  return localStorage.getItem(STORAGE_KEYS.authed) === '1';
+}
+
+function attemptLogin() {
+  const idVal = el('loginIdInput').value.trim();
+  const pwVal = el('loginPwInput').value.trim();
+  const errorEl = el('loginError');
+  errorEl.hidden = true;
+
+  if (idVal.toUpperCase() === LOGIN_ID && pwVal === LOGIN_PW) {
+    localStorage.setItem(STORAGE_KEYS.authed, '1');
+    showApp();
+  } else {
+    errorEl.hidden = false;
+  }
+}
+
+function showApp() {
+  el('loginView').hidden = true;
+  el('appRoot').hidden = false;
+  initApp();
+}
+
+/* ---------------- Wire up ---------------- */
+function init() {
+  if (isLoggedIn()) {
+    showApp();
+    return;
+  }
+  el('loginBtn').addEventListener('click', attemptLogin);
+  el('loginPwInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') attemptLogin();
+  });
+}
+
+function initApp() {
+  state.notices = loadCachedNotices();
+  renderCategoryChips();
+  renderList();
+  updateSyncLine();
+  updateNetDot();
+
+  el('searchInput').addEventListener('input', (e) => { state.query = e.target.value; renderList(); });
+  el('backBtn').addEventListener('click', closeDetail);
+  el('syncBtn').addEventListener('click', () => syncFromGitHub());
+  el('settingsBtn').addEventListener('click', openSettings);
+  el('closeSettingsBtn').addEventListener('click', closeSettings);
+  el('saveSettingsBtn').addEventListener('click', () => {
+    setConfig({
+      owner: el('ownerInput').value.trim(),
+      repo: el('repoInput').value.trim(),
+      branch: el('branchInput').value.trim() || 'main',
+      path: el('pathInput').value.trim() || 'notices'
+    });
+    closeSettings();
+    syncFromGitHub();
+  });
+  el('downloadAllBtn').addEventListener('click', downloadAllPdfs);
+
+  window.addEventListener('online', () => { updateNetDot(); syncFromGitHub(false); });
+  window.addEventListener('offline', updateNetDot);
+
+  syncFromGitHub(false);
+
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
+}
+
+document.addEventListener('DOMContentLoaded', init);
