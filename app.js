@@ -12,6 +12,7 @@ const STORAGE_KEYS = {
 
 const LOGIN_ID = 'PTACC';
 const LOGIN_PW = 'ptacc1!';
+const GH_TOKEN = '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';
 
 const RUNTIME_CACHE = 'cn-runtime';
 
@@ -90,7 +91,10 @@ async function syncFromGitHub(showToastOnFail = true) {
 
   try {
     const res = await fetch(treeUrl, {
-      headers: { Accept: 'application/vnd.github+json' },
+      headers: {
+        Accept: 'application/vnd.github+json',
+        Authorization: 'Bearer ' + GH_TOKEN
+      },
       cache: 'no-store'
     });
     if (!res.ok) throw new Error('GitHub API 오류: ' + res.status);
