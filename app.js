@@ -127,7 +127,7 @@ async function syncFromGitHub(showToastOnFail = true) {
 
     const notices = Array.from(groupMap.values());
 
-    // 파일 이름이 공지 제목과 같은 첨부파일을 목록 맨 위로 올린다.
+    // 파일 이름이 공지 제목과 같은 첨부파일을 목록 맨 위로 올린다. (파일명 끝의 날짜는 떼고 비교)
     for (const n of notices) {
       n.attachments.sort((a, b) => {
         const aMatch = a.name === n.title;
