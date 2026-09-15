@@ -12,7 +12,7 @@ const STORAGE_KEYS = {
 
 const LOGIN_ID = 'PTACC';
 const LOGIN_PW = 'ptacc1!';
-const PROXY_URL = 'https://script.google.com/macros/s/AKfycbyYWK6g3hDpCXMKuhpIU7S1uL1U8DvVUCI3azTPL5gCWkPPNV-EQyvhzRMPJgGgjNqU-Q/exec';
+const PROXY_URL = 'https://parataaircc.github.io/CabinCrewNotice/app.js';
 
 const RUNTIME_CACHE = 'cn-runtime';
 
