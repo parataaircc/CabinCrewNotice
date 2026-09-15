@@ -78,6 +78,7 @@ async function syncFromGitHub(showToastOnFail = true) {
   const { owner, repo, branch, path } = getConfig();
   if (!owner || !repo) { openSettings(); return; }
 
+  const oldNotices = state.notices;
   const treeUrl = `https://api.github.com/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`;
   const rootPrefix = path.replace(/^\/|\/$/g, '') + '/';
 
@@ -124,6 +125,7 @@ async function syncFromGitHub(showToastOnFail = true) {
 
     state.notices = notices;
     saveNotices(notices);
+    await pruneStaleCache(oldNotices, notices);
     setLastSync(new Date().toISOString());
     renderCategoryChips();
     renderList();
@@ -141,6 +143,18 @@ async function isCached(url) {
     const cache = await caches.open(RUNTIME_CACHE);
     return !!(await cache.match(url, { ignoreVary: true }));
   } catch { return false; }
+}
+async function pruneStaleCache(oldNotices, newNotices) {
+  if (!('caches' in window)) return;
+  try {
+    const newUrls = new Set(newNotices.map(n => n.url));
+    const cache = await caches.open(RUNTIME_CACHE);
+    for (const n of oldNotices) {
+      if (!newUrls.has(n.url)) {
+        await cache.delete(n.url);
+      }
+    }
+  } catch { /* ignore */ }
 }
 
 async function ensureCached(url) {
