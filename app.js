@@ -24,16 +24,22 @@ const state = {
   current: null
 };
 
-/* ---------------- Filename → date + title ---------------- */
+/* ---------------- Filename → pinned + date + title ---------------- */
 function parseFilename(name) {
-  const base = name.replace(/\.pdf$/i, '');
+  let base = name.replace(/\.pdf$/i, '');
+  let pinned = false;
+  const pinMatch = base.match(/^\[공지\]\s*/);
+  if (pinMatch) {
+    pinned = true;
+    base = base.slice(pinMatch[0].length);
+  }
   const m = base.match(/^(.*?)[\s_-]*(\d{4})\.(\d{2})\.(\d{2})$/);
   if (m) {
     const title = m[1].trim() || base;
     const date = `${m[2]}-${m[3]}-${m[4]}`;
-    return { date, title };
+    return { date, title, pinned };
   }
-  return { date: '', title: base };
+  return { date: '', title: base, pinned };
 }
 
 const CATEGORY_ORDER = ['Safety&Security', 'Service', 'General', 'Catering', 'Station INFO'];
@@ -98,13 +104,14 @@ async function syncFromGitHub(showToastOnFail = true) {
         const segments = rel.split('/');
         const category = segments.length > 1 ? segments[0] : '미분류';
         const filename = segments[segments.length - 1];
-        const { date, title } = parseFilename(filename);
+        const { date, title, pinned } = parseFilename(filename);
         return {
           id: it.sha,
           filename,
           category,
           date,
           title,
+          pinned,
           url: buildRawUrl(owner, repo, branch, it.path)
         };
       });
@@ -117,6 +124,7 @@ async function syncFromGitHub(showToastOnFail = true) {
     });
 
     notices.sort((a, b) => {
+      if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
       if (!a.date && !b.date) return a.title.localeCompare(b.title, 'ko');
       if (!a.date) return 1;
       if (!b.date) return -1;
@@ -144,6 +152,7 @@ async function isCached(url) {
     return !!(await cache.match(url, { ignoreVary: true }));
   } catch { return false; }
 }
+
 async function pruneStaleCache(oldNotices, newNotices) {
   if (!('caches' in window)) return;
   try {
@@ -254,10 +263,10 @@ async function renderList() {
   for (const n of list) {
     const cached = await isCached(n.url);
     const card = document.createElement('div');
-    card.className = 'notice-card';
-    card.style.borderLeftColor = colorForCategory(n.category);
+    card.className = 'notice-card' + (n.pinned ? ' pinned' : '');
+    card.style.borderLeftColor = n.pinned ? '#C9A227' : colorForCategory(n.category);
     card.innerHTML = `
-      <div class="meta"><span class="cat">${escapeHtml(n.category)}</span>${n.date ? `<span>${escapeHtml(n.date)}</span>` : ''}</div>
+      <div class="meta">${n.pinned ? '<span class="pin-badge">📌 공지</span>' : ''}<span class="cat">${escapeHtml(n.category)}</span>${n.date ? `<span>${escapeHtml(n.date)}</span>` : ''}</div>
       <h3>${escapeHtml(n.title)}</h3>
       <span class="attach-flag${cached ? ' saved' : ''}">${cached ? '오프라인 저장됨' : 'PDF · 온라인 필요'}</span>
     `;
