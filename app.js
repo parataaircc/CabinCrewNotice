@@ -24,9 +24,16 @@ const state = {
   current: null
 };
 
-/* ---------------- Filename → title ---------------- */
-function titleFromFilename(name) {
-  return name.replace(/\.pdf$/i, '').trim();
+/* ---------------- Filename → date + title ---------------- */
+function parseFilename(name) {
+  const base = name.replace(/\.pdf$/i, '');
+  const m = base.match(/^(.*?)[\s_-]*(\d{4})\.(\d{2})\.(\d{2})$/);
+  if (m) {
+    const title = m[1].trim() || base;
+    const date = `${m[2]}-${m[3]}-${m[4]}`;
+    return { date, title };
+  }
+  return { date: '', title: base };
 }
 
 const CATEGORY_ORDER = ['Safety&Security', 'Service', 'General', 'Catering', 'Station INFO'];
@@ -46,8 +53,8 @@ function saveNotices(list) { localStorage.setItem(STORAGE_KEYS.notices, JSON.str
 
 function getConfig() {
   return {
-    owner: localStorage.getItem(STORAGE_KEYS.owner) || 'lluon9292',
-    repo: localStorage.getItem(STORAGE_KEYS.repo) || 'Cabin-Crew-Notice',
+    owner: localStorage.getItem(STORAGE_KEYS.owner) || 'parataaircc',
+    repo: localStorage.getItem(STORAGE_KEYS.repo) || 'CabinCrewNotice',
     branch: localStorage.getItem(STORAGE_KEYS.branch) || 'main',
     path: localStorage.getItem(STORAGE_KEYS.path) || 'notices'
   };
@@ -86,20 +93,21 @@ async function syncFromGitHub(showToastOnFail = true) {
     const rawNotices = data.tree
       .filter(it => it.type === 'blob' && it.path.startsWith(rootPrefix) && /\.pdf$/i.test(it.path))
       .map(it => {
-        const rel = it.path.slice(rootPrefix.length); // e.g. "Service/파일.pdf" or "파일.pdf"
+        const rel = it.path.slice(rootPrefix.length);
         const segments = rel.split('/');
         const category = segments.length > 1 ? segments[0] : '미분류';
         const filename = segments[segments.length - 1];
+        const { date, title } = parseFilename(filename);
         return {
           id: it.sha,
           filename,
           category,
-          title: titleFromFilename(filename),
+          date,
+          title,
           url: buildRawUrl(owner, repo, branch, it.path)
         };
       });
 
-    // 내용이 완전히 같은 파일(sha 동일)은 한 번만 남긴다 — 실수로 중복 업로드된 경우 방지
     const seen = new Set();
     const notices = rawNotices.filter(n => {
       if (seen.has(n.id)) return false;
@@ -108,9 +116,10 @@ async function syncFromGitHub(showToastOnFail = true) {
     });
 
     notices.sort((a, b) => {
-      const rankDiff = categoryRank(a.category) - categoryRank(b.category);
-      if (rankDiff !== 0) return rankDiff;
-      return a.title.localeCompare(b.title, 'ko');
+      if (!a.date && !b.date) return a.title.localeCompare(b.title, 'ko');
+      if (!a.date) return 1;
+      if (!b.date) return -1;
+      return b.date.localeCompare(a.date);
     });
 
     state.notices = notices;
@@ -156,9 +165,6 @@ async function getPdfObjectUrl(url) {
     }
     if (res) {
       const rawBlob = await res.blob();
-      // Some CDNs (e.g. raw.githubusercontent.com) don't send a correct
-      // application/pdf content-type, which makes browsers render a blank
-      // frame instead of the PDF. Force the type explicitly.
       const pdfBlob = rawBlob.type === 'application/pdf'
         ? rawBlob
         : new Blob([rawBlob], { type: 'application/pdf' });
@@ -237,7 +243,7 @@ async function renderList() {
     card.className = 'notice-card';
     card.style.borderLeftColor = colorForCategory(n.category);
     card.innerHTML = `
-      <div class="meta"><span class="cat">${escapeHtml(n.category)}</span></div>
+      <div class="meta"><span class="cat">${escapeHtml(n.category)}</span>${n.date ? `<span>${escapeHtml(n.date)}</span>` : ''}</div>
       <h3>${escapeHtml(n.title)}</h3>
       <span class="attach-flag${cached ? ' saved' : ''}">${cached ? '오프라인 저장됨' : 'PDF · 온라인 필요'}</span>
     `;
@@ -253,6 +259,7 @@ async function openDetail(n) {
   el('detailView').hidden = false;
 
   el('detailCat').textContent = n.category;
+  el('detailDate').textContent = n.date ? ` · ${n.date}` : '';
   el('detailTitle').textContent = n.title;
 
   const cachedBefore = await isCached(n.url);
@@ -268,8 +275,6 @@ async function openDetail(n) {
     return;
   }
 
-  // 사파리는 await로 잠깐 기다렸다가 페이지를 이동시키면 '사용자가 직접 누른 것'으로
-  // 인정하지 않고 조용히 막는 경우가 있어서, 클릭 전에 미리 PDF를 준비해둔다.
   btn.disabled = true;
   btn.textContent = '불러오는 중...';
   const objectUrl = await getPdfObjectUrl(n.url);
